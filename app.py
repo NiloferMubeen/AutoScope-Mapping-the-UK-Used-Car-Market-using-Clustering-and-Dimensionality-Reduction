@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import joblib
 import plotly.express as px
+import shap
+import matplotlib.pyplot as plt
 from streamlit_option_menu import option_menu
 
 st.set_page_config(page_title="AutoScope", layout="wide")
@@ -28,6 +30,19 @@ def load_data():
 
 price_model, kmeans, scaler = load_models()
 cars, clusters, scores = load_data()
+
+
+@st.cache_resource
+def get_explainer():
+    return shap.TreeExplainer(price_model["model"])
+
+
+@st.cache_data
+def get_global_shap():
+    sample = cars.sample(n=min(300, len(cars)), random_state=42)
+    X = sample[["brand", "age", "mileage", "transmission", "fuelType", "tax", "mpg", "engineSize"]]
+    X = pd.get_dummies(X).reindex(columns=price_model["columns"], fill_value=0).astype(float)
+    return get_explainer()(X)
 
 
 # ------------------------------------------------------------ PAGE 1: PRICE PREDICTION
@@ -68,6 +83,12 @@ def prediction_page():
         st.write("Top brands:", ", ".join(clusters[clusters["KMeans"] == segment]["brand"].value_counts().head(3).index))
         st.write("Top fuel type:", clusters[clusters["KMeans"] == segment]["fuelType"].mode()[0])
 
+        st.subheader("Why this price? (SHAP)")
+        shap_values = get_explainer()(row.astype(float))
+        shap.plots.waterfall(shap_values[0], show=False)
+        st.pyplot(plt.gcf())
+        plt.close()
+
 
 # ------------------------------------------------------------ PAGE 2: CLUSTERING
 def clustering_page():
@@ -96,16 +117,34 @@ def clustering_page():
     st.dataframe(profile)
 
 
+# ------------------------------------------------------------ PAGE 3: SHAP
+def shap_page():
+    st.title("Model Explainability (SHAP)")
+    shap_values = get_global_shap()
+
+    st.subheader("Feature Importance")
+    shap.plots.bar(shap_values, show=False)
+    st.pyplot(plt.gcf())
+    plt.close()
+
+    st.subheader("Feature Impact on Price")
+    shap.plots.beeswarm(shap_values, show=False)
+    st.pyplot(plt.gcf())
+    plt.close()
+
+
 # ------------------------------------------------------------ SIDEBAR MENU
 with st.sidebar:
     page = option_menu(
         "AutoScope",
-        ["Price Prediction", "Clustering"],
-        icons=["currency-pound", "diagram-3"],
+        ["Price Prediction", "Clustering", "SHAP"],
+        icons=["currency-pound", "diagram-3", "bar-chart"],
         default_index=0,
     )
 
 if page == "Price Prediction":
     prediction_page()
-else:
+elif page == "Clustering":
     clustering_page()
+else:
+    shap_page()
